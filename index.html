@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>교무실 호출 시스템 - 대구 화원고등학교</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        @theme {
+            --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+        }
+        body { font-family: "Inter", sans-serif; }
+    </style>
+</head>
+<body class="bg-[#F8FAFC]">
+    <div id="root"></div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18.2.0",
+            "react-dom": "https://esm.sh/react-dom@18.2.0",
+            "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+            "react-router-dom": "https://esm.sh/react-router-dom@6.11.2",
+            "firebase/app": "https://esm.sh/firebase@9.22.0/app",
+            "firebase/firestore": "https://esm.sh/firebase@9.22.0/firestore",
+            "lucide-react": "https://esm.sh/lucide-react@0.221.0",
+            "framer-motion": "https://esm.sh/framer-motion@10.12.16"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import React, { useState, useEffect, useMemo } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { HashRouter, Routes, Route, Link, useNavigate } from 'react-router-dom';
+        import { initializeApp } from 'firebase/app';
+        import { 
+            getFirestore, collection, onSnapshot, query, orderBy, 
+            updateDoc, doc, serverTimestamp, getDocs, setDoc 
+        } from 'firebase/firestore';
+        import { 
+            School, UserCog, User, Bell, ArrowLeft, RefreshCw, ChevronRight 
+        } from 'lucide-react';
+        import { motion, AnimatePresence } from 'framer-motion';
+
+        // --- Firebase Config ---
+        const firebaseConfig = {
+            projectId: "gen-lang-client-0090680745",
+            appId: "1:772142383610:web:3e57d48c8e7bce2660e443",
+            apiKey: "AIzaSyC-PIJkoFL5ncffXc5J2oQ-3oqrep0SjXE",
+            authDomain: "gen-lang-client-0090680745.firebaseapp.com",
+            storageBucket: "gen-lang-client-0090680745.firebasestorage.app",
+            messagingSenderId: "772142383610",
+            firestoreDatabaseId: "ai-studio-a877108d-408c-4752-991a-73c57afca7af"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+        // --- Seed Logic ---
+        const INITIAL_TEACHERS = [
+            { name: '김철수', subject: '국어', status: 'available' },
+            { name: '이영희', subject: '수학', status: 'class' },
+            { name: '박지민', subject: '영어', status: 'available' },
+            { name: '정유진', subject: '과학', status: 'away' },
+            { name: '최동현', subject: '사회', status: 'available' },
+            { name: '강민경', subject: '체육', status: 'class' },
+            { name: '윤성호', subject: '음악', status: 'available' },
+            { name: '한소희', subject: '미술', status: 'away' },
+            { name: '오세훈', subject: '기술', status: 'available' },
+            { name: '임나연', subject: '가정', status: 'class' },
+            { name: '송강호', subject: '정보', status: 'available' },
+            { name: '배수지', subject: '한문', status: 'away' },
+            { name: '조세호', subject: '윤리', status: 'available' },
+            { name: '권지용', subject: '지리', status: 'class' },
+            { name: '신민아', subject: '역사', status: 'available' },
+            { name: '홍길동', subject: '물리', status: 'away' },
+            { name: '장미란', subject: '화학', status: 'available' },
+            { name: '고길동', subject: '생명과학', status: 'class' },
+            { name: '마동석', subject: '지구과학', status: 'available' },
+            { name: '손흥민', subject: '제2외국어', status: 'available' }
+        ];
+
+        async function seedTeachers() {
+            const teachersRef = collection(db, 'teachers');
+            const snapshot = await getDocs(teachersRef);
+            if (snapshot.empty) {
+                for (const t of INITIAL_TEACHERS) {
+                    const id = t.name.replace(/\s/g, '_').toLowerCase();
+                    await setDoc(doc(db, 'teachers', id), {
+                        ...t,
+                        updatedAt: serverTimestamp(),
+                    });
+                }
+            }
+        }
+
+        // --- Helpers ---
+        function speak(text) {
+            if (!('speechSynthesis' in window)) return;
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'ko-KR';
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // --- Components ---
+        const StatusBadge = ({ status }) => {
+            const map = {
+                available: { label: '자리에 계심', color: 'bg-[#DCFCE7] text-[#166534]' },
+                class: { label: '수업 중', color: 'bg-[#FEF9C3] text-[#854D0E]' },
+                away: { label: '부재중', color: 'bg-[#F1F5F9] text-[#475569]' },
+            };
+            const { label, color } = map[status];
+            return (
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${color}`}>
+                    {label}
+                </span>
+            );
+        };
+
+        const KioskPage = ({ teachers, loading }) => {
+            const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
+
+            return (
+                <div className="h-screen bg-[#F8FAFC] flex flex-col overflow-hidden">
+                    <header className="h-[90px] bg-white border-b border-slate-200 px-8 flex justify-between items-center shrink-0">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center">
+                                <School className="text-white" size={24} />
+                            </div>
+                            <div>
+                                <h1 className="text-2xl font-black text-slate-800">Teacher Call</h1>
+                                <p className="text-slate-500 text-sm">선생님 호출 시스템 (화원고 교무실)</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-6">
+                            <div className="text-right text-slate-600 hidden md:block">
+                                <p className="text-xl font-bold">{today}</p>
+                                <p className="text-xs uppercase tracking-widest text-slate-400">Restricted Area: Faculty Office</p>
+                            </div>
+                            <Link to="/admin" className="p-3 bg-slate-100 rounded-xl text-slate-400 hover:text-slate-600 transition-all">
+                                <UserCog size={24} />
+                            </Link>
+                        </div>
+                    </header>
+
+                    <main className="flex-grow p-6 overflow-y-auto">
+                        <div className="max-w-[1400px] mx-auto">
+                            {loading ? (
+                                <div className="flex flex-col items-center justify-center py-32 gap-4">
+                                    <RefreshCw className="w-12 h-12 text-blue-600 animate-spin" />
+                                    <p className="text-slate-400 font-bold uppercase tracking-[0.2em]">Initial loading...</p>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                                    {teachers.map((teacher, index) => {
+                                        const isAvailable = teacher.status === 'available';
+                                        return (
+                                            <motion.div
+                                                key={teacher.id}
+                                                initial={{ opacity: 0, scale: 0.95 }}
+                                                animate={{ opacity: 1, scale: 1 }}
+                                                transition={{ delay: index * 0.02 }}
+                                                className={`bg-white rounded-2xl border border-slate-200 p-4 flex flex-col justify-between shadow-sm transition-all h-[240px] ${!isAvailable ? 'opacity-80' : ''}`}
+                                            >
+                                                <div className="space-y-1">
+                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{teacher.subject}</p>
+                                                    <h2 className="text-xl font-black text-slate-800 leading-tight">{teacher.name} 선생님</h2>
+                                                    <StatusBadge status={teacher.status} />
+                                                </div>
+
+                                                <button
+                                                    disabled={!isAvailable}
+                                                    onClick={() => speak(`${teacher.name} 선생님, 호출입니다`)}
+                                                    className={`w-full py-4 rounded-xl font-black text-sm transition-all mt-4 ${
+                                                        isAvailable 
+                                                            ? 'bg-[#2563EB] text-white shadow-lg active:scale-95' 
+                                                            : 'bg-[#E2E8F0] text-[#94A3B8] cursor-not-allowed'
+                                                    }`}
+                                                >
+                                                    {isAvailable ? "호출하기" : "호출 불가"}
+                                                </button>
+                                            </motion.div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </main>
+
+                    <footer className="h-[50px] bg-slate-900 text-white flex items-center px-8 justify-between text-[10px] uppercase tracking-widest shrink-0 font-bold">
+                        <div className="flex gap-8">
+                            <span className="flex items-center gap-2"><span className="w-2 h-2 bg-emerald-400 rounded-full"></span> Available</span>
+                            <span className="flex items-center gap-2"><span className="w-2 h-2 bg-yellow-400 rounded-full"></span> In Class</span>
+                            <span className="flex items-center gap-2"><span className="w-2 h-2 bg-slate-400 rounded-full"></span> Away</span>
+                        </div>
+                        <div>DEAGU HWAWON HIGH SCHOOL</div>
+                    </footer>
+                </div>
+            );
+        };
+
+        const AdminPage = ({ teachers, loading, onUpdate }) => {
+            const statuses = [
+                { value: 'available', label: '자리에 계심', color: 'bg-emerald-600' },
+                { value: 'class', label: '수업 중', color: 'bg-blue-600' },
+                { value: 'away', label: '부재중', color: 'bg-rose-600' },
+            ];
+
+            return (
+                <div className="min-h-screen bg-[#F8FAFC] flex flex-col">
+                    <header className="h-[90px] bg-white border-b border-slate-200 px-8 flex justify-between items-center shrink-0">
+                        <div className="flex items-center gap-4">
+                            <Link to="/" className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+                                <ArrowLeft size={24} className="text-slate-600" />
+                            </Link>
+                            <h1 className="text-2xl font-black text-slate-800">선생님 상태 관리</h1>
+                        </div>
+                    </header>
+
+                    <main className="flex-1 max-w-[1400px] mx-auto w-full p-8">
+                        {loading ? (
+                            <div className="flex flex-col items-center justify-center py-32 gap-4">
+                                <RefreshCw className="animate-spin text-slate-300" size={40} />
+                                <p className="text-slate-400 font-bold uppercase">Refreshing data...</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                                {teachers.map((teacher) => (
+                                    <div key={teacher.id} className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-6">
+                                        <div>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{teacher.subject}</p>
+                                            <h3 className="text-xl font-black text-slate-800">{teacher.name} 선생님</h3>
+                                        </div>
+                                        <div className="grid grid-cols-1 gap-2">
+                                            {statuses.map((s) => {
+                                                const isActive = teacher.status === s.value;
+                                                return (
+                                                    <button
+                                                        key={s.value}
+                                                        onClick={() => onUpdate(teacher.id, s.value)}
+                                                        className={`py-3 px-4 rounded-xl text-sm font-black transition-all border-2 text-left flex items-center justify-between ${
+                                                            isActive 
+                                                                ? `${s.color} text-white border-transparent shadow-md scale-[1.02]` 
+                                                                : "bg-white border-slate-100 text-slate-400 hover:border-slate-300"
+                                                        }`}
+                                                    >
+                                                        {s.label}
+                                                        {isActive && <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </main>
+                    <footer className="h-[50px] bg-slate-900 text-white/40 flex items-center px-8 justify-center text-[10px] font-bold tracking-widest uppercase shrink-0">
+                        ADMINISTRATION PORTAL v1.0.4
+                    </footer>
+                </div>
+            );
+        };
+
+        // --- App Engine ---
+        const App = () => {
+            const [teachers, setTeachers] = useState([]);
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+                seedTeachers().catch(console.error);
+                const q = query(collection(db, 'teachers'), orderBy('name', 'asc'));
+                const unsubscribe = onSnapshot(q, (snapshot) => {
+                    const data = [];
+                    snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
+                    setTeachers(data);
+                    setLoading(false);
+                });
+                return () => unsubscribe();
+            }, []);
+
+            const handleUpdateStatus = async (id, status) => {
+                try {
+                    await updateDoc(doc(db, 'teachers', id), {
+                        status,
+                        updatedAt: serverTimestamp()
+                    });
+                } catch (err) {
+                    console.error("Update failed:", err);
+                    alert("상태 수정 권한이 없거나 오류가 발생했습니다.");
+                }
+            };
+
+            return (
+                <HashRouter>
+                    <Routes>
+                        <Route path="/" element={<KioskPage teachers={teachers} loading={loading} />} />
+                        <Route path="/admin" element={<AdminPage teachers={teachers} loading={loading} onUpdate={handleUpdateStatus} />} />
+                    </Routes>
+                </HashRouter>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+
+    </script>
+</body>
+</html>

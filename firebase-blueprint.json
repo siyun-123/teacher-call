@@ -1,0 +1,26 @@
+{
+  "entities": {
+    "Teacher": {
+      "title": "Teacher",
+      "description": "A school teacher with their current availability status",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Teacher's full name" },
+        "status": { 
+          "type": "string", 
+          "enum": ["available", "class", "away"],
+          "description": "Current availability status"
+        },
+        "subject": { "type": "string", "description": "Subject taught by the teacher" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last time the status was updated" }
+      },
+      "required": ["name", "status"]
+    }
+  },
+  "firestore": {
+    "/teachers/{teacherId}": {
+      "schema": "Teacher",
+      "description": "Collection of teachers"
+    }
+  }
+}

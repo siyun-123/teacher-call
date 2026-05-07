@@ -1,0 +1,35 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Teachers collection
+    match /teachers/{teacherId} {
+      // Kiosk and Admin need to read all teachers
+      allow read: if true;
+      
+      // Validation helper
+      function isValidTeacher(data) {
+        return data.name is string && data.name.size() > 0 && data.name.size() <= 50
+            && data.status in ['available', 'class', 'away']
+            && (data.get('subject', '') is string && data.get('subject', '').size() <= 50)
+            && data.updatedAt is timestamp;
+      }
+
+      // Create: Allow if valid schema
+      allow create: if isValidTeacher(request.resource.data)
+                    && request.resource.data.keys().hasAll(['name', 'status', 'updatedAt'])
+                    && request.resource.data.keys().size() >= 3;
+
+      // Update: Allow status and updatedAt changes
+      allow update: if isValidTeacher(request.resource.data)
+                    && request.resource.data.name == resource.data.name;
+                    
+      // Delete: Deny for now (we define teachers once)
+      allow delete: if false;
+    }
+  }
+}
